@@ -6,15 +6,74 @@
     <title>AI Interview Simulator</title>
     <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
-<h1>AI Interview Simulator</h1>
-<div id="questionBox">
-    <p id="question">Question will appear here</p>
-</div>
-<textarea id="answer" placeholder="Type your answer here"></textarea>
-    <br> <br>
-    <button onclick="checkAnswer()">Submit Answer</button>
-    <p id="result"></p>
+
+    <div id="setup">
+
+        <h1>AI Interview Simulator</h1>
+
+        <h2>Choose Interview Type</h2>
+
+        <select id="interviewType">
+            <option value="technical">Technical</option>
+            <option value="hr">HR</option>
+            <option value="aiml">AI / ML</option>
+        </select>
+
+        <h2>Choose Difficulty</h2>
+
+        <select id="difficulty">
+            <option value="easy">Easy</option>
+            <option value="medium">Medium</option>
+            <option value="hard">Hard</option>
+        </select>
+
+        <h2>Number of Questions</h2>
+
+        <select id="questionCount">
+            <option value="5">5 Questions</option>
+            <option value="10">10 Questions</option>
+        </select>
+
+        <br><br>
+
+        <button onclick="startInterview()">Start Interview</button>
+
+    </div>
+
+
+    <div id="interview" style="display:none;">
+
+        <h1>AI Interview Simulator</h1>
+
+        <p id="question"></p>
+
+        <textarea
+            id="answer"
+            placeholder="Type your answer here">
+        </textarea>
+
+        <br><br>
+
+        <button
+            id="submitButton"
+            onclick="checkAnswer()">
+            Submit Answer
+        </button>
+
+        <button
+            id="nextButton"
+            onclick="nextQuestion()"
+            style="display:none;">
+            Next Question
+        </button>
+
+        <p id="result"></p>
+
+    </div>
+
     <script src="script.js"></script>
+
 </body>
 </html>
