@@ -1,3 +1,5 @@
+const API_URL = "https://ai-based-interview-simulator.onrender.com";
+
 const questionBanks = {
     technical: {
         easy: [
@@ -11,7 +13,7 @@ const questionBanks = {
             "What is an array?",
             "What is a database?",
             "What is an API?"
-        ],
+        ],git status
         medium: [
             "Explain the four pillars of OOP.",
             "What is normalization in DBMS?",
@@ -174,7 +176,7 @@ async function checkAnswer() {
     document.getElementById("submitButton").disabled = true;
 
     try {
-        const response = await fetch("http://127.0.0.1:8000/evaluate", {
+        const response = await fetch(`${API_URL}/evaluate`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
@@ -212,7 +214,7 @@ async function checkAnswer() {
         console.error(error);
 
         result.innerText =
-            "Unable to connect to the AI backend. Make sure FastAPI is running.";
+            "Unable to connect to the AI backend. Please try again.";
 
         document.getElementById("submitButton").disabled = false;
     }
