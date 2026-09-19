@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Interview Preparation OS</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="setup" class="app-shell">
+        <div class="ai-badge">✨ AI-Powered Interview Practice</div>
+        <h1>AI Interview Preparation OS</h1>
+        <p class="hero-support">Generate role-specific interviews, practice realistic questions, and receive evidence-based feedback on your performance.</p>
+
+        <nav class="progress-indicator" id="progressIndicator" aria-label="Setup progress">
+            <div class="progress-step active" data-step="1">
+                <span class="step-num">01</span><span>Candidate</span>
+            </div>
+            <div class="progress-step" data-step="2">
+                <span class="step-num">02</span><span>Role</span>
+            </div>
+            <div class="progress-step" data-step="3">
+                <span class="step-num">03</span><span>Interview Setup</span>
+            </div>
+            <div class="progress-step" data-step="4">
+                <span class="step-num">04</span><span>Start</span>
+            </div>
+        </nav>
+
+        <div class="setup-grid">
+
+            <div class="card profile-card">
+                <div class="card-header">
+                    <div class="avatar" id="avatar" aria-hidden="true">?</div>
+                    <div>
+                        <label for="candidateId" class="card-label">Candidate Name</label>
+                        <p class="card-hint">This name will be used to track your progress across sessions</p>
+                    </div>
+                </div>
+                <input type="text" id="candidateId" placeholder="Your name or email" autocomplete="name">
+            </div>
+
+            <div class="card">
+                <div class="card-icon" aria-hidden="true">🎯</div>
+                <label for="role" class="card-label">Target Role</label>
+                <p class="card-hint">What role are you preparing for?</p>
+                <input id="role" type="text" list="roleSuggestions" value="Software Developer" maxlength="200" autocomplete="off">
+                <datalist id="roleSuggestions">
+                    <option value="Software Developer">
+                    <option value="AI/ML Engineer">
+                    <option value="Data Scientist">
+                    <option value="Frontend Developer">
+                    <option value="Backend Developer">
+                    <option value="Full Stack Developer">
+                </datalist>
+            </div>
+
+            <div class="card">
+                <div class="card-row-between">
+                    <div>
+                        <div class="card-icon" aria-hidden="true">📄</div>
+                        <label for="jobDescription" class="card-label">Job Description</label>
+                    </div>
+                    <span class="badge-optional">Optional · Recommended</span>
+                </div>
+                <p class="card-hint">Paste the job description to make your interview role-aware.</p>
+                <textarea id="jobDescription" maxlength="10000" placeholder="Paste a job description to make the interview role-aware."></textarea>
+                <div class="char-count" id="jdCharCount">0 / 10,000</div>
+            </div>
+
+            <div class="config-section">
+                <div class="section-heading">Interview Configuration</div>
+                <div class="config-grid">
+                    <fieldset class="option-group" id="interviewTypeGroup">
+                        <legend class="option-group-label">🎤 Interview Type</legend>
+                        <div class="option-cards">
+                            <button type="button" class="option-card active" data-target="interviewType" data-value="technical" aria-pressed="true">
+                                <span class="option-title">🎯 Technical</span>
+                                <span class="option-desc">Coding, CS fundamentals &amp; technical concepts</span>
+                            </button>
+                            <button type="button" class="option-card" data-target="interviewType" data-value="hr" aria-pressed="false">
+                                <span class="option-title">💼 HR</span>
+                                <span class="option-desc">Motivation, culture &amp; career questions</span>
+                            </button>
+                            <button type="button" class="option-card" data-target="interviewType" data-value="aiml" aria-pressed="false">
+                                <span class="option-title">🧠 AI / ML</span>
+                                <span class="option-desc">Machine learning concepts &amp; systems</span>
+                            </button>
+                        </div>
+                    </fieldset>
+
+                    <fieldset class="option-group" id="difficultyGroup">
+                        <legend class="option-group-label">⚡ Difficulty</legend>
+                        <div class="option-cards">
+                            <button type="button" class="option-card active" data-target="difficulty" data-value="easy" aria-pressed="true">
+                                <span class="option-title">Easy</span>
+                                <span class="option-desc">Foundation-level questions</span>
+                            </button>
+                            <button type="button" class="option-card" data-target="difficulty" data-value="medium" aria-pressed="false">
+                                <span class="option-title">Medium</span>
+                                <span class="option-desc">Interview-level questions</span>
+                            </button>
+                            <button type="button" class="option-card" data-target="difficulty" data-value="hard" aria-pressed="false">
+                                <span class="option-title">Hard</span>
+                                <span class="option-desc">Challenging interview questions</span>
+                            </button>
+                        </div>
+                    </fieldset>
+                </div>
+
+                <fieldset class="option-group" id="questionCountGroup">
+                    <legend class="option-group-label">❓ Number of Questions</legend>
+                    <div class="segmented" id="questionCountSegmented">
+                        <button type="button" class="segment active" data-target="questionCount" data-value="5" aria-pressed="true">5 Questions</button>
+                        <button type="button" class="segment" data-target="questionCount" data-value="10" aria-pressed="false">10 Questions</button>
+                    </div>
+                </fieldset>
+
+                <!-- Hidden native controls: script.js reads these .value properties directly.
+                     The visible cards/segments above stay in sync via script.js event listeners. -->
+                <select id="interviewType" aria-hidden="true" style="display:none;">
+                    <option value="technical">Technical</option>
+                    <option value="hr">HR</option>
+                    <option value="aiml">AI / ML</option>
+                </select>
+                <select id="difficulty" aria-hidden="true" style="display:none;">
+                    <option value="easy">Easy</option>
+                    <option value="medium">Medium</option>
+                    <option value="hard">Hard</option>
+                </select>
+                <select id="questionCount" aria-hidden="true" style="display:none;">
+                    <option value="5">5 Questions</option>
+                    <option value="10">10 Questions</option>
+                </select>
+            </div>
+
+            <button class="cta-button" onclick="startInterview()">
+                <span class="cta-main">✨ Start Interview</span>
+                <span class="cta-sub">Begin your AI-powered interview →</span>
+            </button>
+            <p class="cta-note">Your interview will be generated based on your selected role and preferences.</p>
+        </div>
+    </div>
+
+    <div id="interview" style="display:none;">
+        <h1>AI Interview Preparation OS</h1>
+        <div class="question-container">
+            <p id="question"></p>
+            <textarea id="answer" placeholder="Type your answer here"></textarea>
+            <button id="submitButton" onclick="checkAnswer()">Submit Answer</button>
+            <button id="nextButton" onclick="nextQuestion()" style="display:none;">Next Question</button>
+            <div id="result"></div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
