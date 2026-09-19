@@ -107,13 +107,3 @@ Passionate about Artificial Intelligence, Machine Learning, Software Development
 ## License
 
 This project is licensed under the MIT License.
-
-## Production security and deployment
-
-- Do **not** commit `Backend/.env`, `Backend/history.db`, or `Backend/venv/`.
-- The backend now creates authenticated interview sessions and protects evaluation/history endpoints with a bearer session token.
-- Candidate access tokens are stored only as SHA-256 hashes in SQLite.
-- The frontend is served by FastAPI at `/app/`, so production deployments can use a same-origin API without a hardcoded localhost URL.
-- For a separately hosted frontend, set `window.APP_API_URL` before loading `script.js` and configure `CORS_ORIGINS` to the exact trusted frontend origin(s).
-- Configure the Gemini API key through the deployment platform's secret/environment-variable settings.
-- Rate limiting is per backend process. For multi-instance deployments, use a shared gateway/Redis-based limiter.
