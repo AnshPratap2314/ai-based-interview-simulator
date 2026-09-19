@@ -883,7 +883,7 @@ https://github.com/AnshPratap2314/ai-based-interview-simulator
 
 Core functionality including:
 
-```test
+```text
 AI Evaluation       ✅
 Authentication      ✅
 Authorization       ✅
