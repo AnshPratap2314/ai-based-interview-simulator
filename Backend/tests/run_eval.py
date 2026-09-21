@@ -1,138 +1,122 @@
-"""
-Run the full eval suite against a running backend and print pass/fail results.
-
-Usage (from Backend/tests/):
-    python run_eval.py
-    python run_eval.py --url http://127.0.0.1:8000
-    python run_eval.py --save results.json
-
-Requires the backend to be running first (uvicorn main:app --reload --port 8000).
-Requires the `requests` package: pip install requests --break-system-packages
-"""
-
+#!/usr/bin/env python3
 import argparse
-import json
 import sys
 import time
+import uuid
 from pathlib import Path
 
 import requests
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from eval_cases import CASES
 
 
-def run_case(base_url: str, case: dict) -> dict:
-    payload = {
-        "session_id": "eval-suite",
-        "role": case.get("role", "Technical Interview"),
-        "difficulty": case.get("difficulty", "medium"),
-        "job_description": case.get("job_description", ""),
-        "question": case["question"],
-        "answer": case["answer"],
-        "expected_skills": [],
-    }
-
-    started = time.perf_counter()
-    try:
-        response = requests.post(f"{base_url}/evaluate", json=payload, timeout=30)
-    except requests.RequestException as exc:
-        return {
-            "name": case["name"],
-            "passed": False,
-            "reasons": [f"request failed: {exc}"],
-            "latency_ms": None,
-        }
-    latency_ms = round((time.perf_counter() - started) * 1000)
-
-    reasons = []
-
-    if "expect_error" in case:
-        passed = response.status_code == case["expect_error"]
-        if not passed:
-            reasons.append(
-                f"expected HTTP {case['expect_error']}, got {response.status_code}"
-            )
-        return {
-            "name": case["name"],
-            "passed": passed,
-            "reasons": reasons,
-            "latency_ms": latency_ms,
-        }
-
-    if response.status_code != 200:
-        return {
-            "name": case["name"],
-            "passed": False,
-            "reasons": [f"unexpected HTTP {response.status_code}: {response.text[:200]}"],
-            "latency_ms": latency_ms,
-        }
-
-    data = response.json()
-
-    if "expect_min_score" in case and data.get("score", -1) < case["expect_min_score"]:
-        reasons.append(f"score {data.get('score')} below minimum {case['expect_min_score']}")
-
-    if "expect_max_score" in case and data.get("score", 999) > case["expect_max_score"]:
-        reasons.append(f"score {data.get('score')} above maximum {case['expect_max_score']}")
-
-    if "expect_human_review" in case and data.get("needs_human_review") != case["expect_human_review"]:
-        reasons.append(
-            f"needs_human_review was {data.get('needs_human_review')}, "
-            f"expected {case['expect_human_review']}"
-        )
-
-    return {
-        "name": case["name"],
-        "passed": len(reasons) == 0,
-        "reasons": reasons,
-        "latency_ms": latency_ms,
-        "score": data.get("score"),
-        "confidence": data.get("confidence"),
-        "needs_human_review": data.get("needs_human_review"),
-    }
+def _check_expected(case, result):
+    score = result.get("score")
+    if not isinstance(score, int) or not 0 <= score <= 100:
+        return False, "invalid score"
+    confidence = result.get("confidence")
+    if not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
+        return False, "invalid confidence"
+    minimum = case.get("expect_min_score")
+    maximum = case.get("expect_max_score")
+    if minimum is not None and score < minimum:
+        return False, f"score {score} < minimum {minimum}"
+    if maximum is not None and score > maximum:
+        return False, f"score {score} > maximum {maximum}"
+    expected_review = case.get("expect_human_review")
+    if expected_review is not None and bool(result.get("needs_human_review")) != expected_review:
+        return False, f"needs_human_review={result.get('needs_human_review')} expected {expected_review}"
+    return True, ""
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run the interview-evaluator test suite.")
-    parser.add_argument("--url", default="http://127.0.0.1:8000", help="Backend base URL")
-    parser.add_argument("--save", default=None, help="Optional path to save results as JSON")
+    parser = argparse.ArgumentParser(description="Run the committed Gemini evaluation regression cases.")
+    parser.add_argument("--url", default="http://127.0.0.1:8000")
+    parser.add_argument("--candidate", default=f"eval-{uuid.uuid4().hex[:12]}")
+    parser.add_argument("--timeout", type=int, default=60)
     args = parser.parse_args()
+    base = args.url.rstrip("/")
 
-    print(f"Running {len(CASES)} test cases against {args.url}\n")
+    try:
+        health = requests.get(f"{base}/health", timeout=10)
+        health.raise_for_status()
+        ready = requests.get(f"{base}/ready", timeout=10)
+        ready.raise_for_status()
+        if ready.json().get("status") != "ready":
+            print("FAIL: backend is not ready", ready.text)
+            return 1
+    except requests.RequestException as exc:
+        print(f"FAIL: backend unavailable: {exc}")
+        return 1
 
-    results = []
-    for case in CASES:
-        result = run_case(args.url, case)
-        results.append(result)
+    session_id = str(uuid.uuid4())
+    try:
+        started = requests.post(
+            f"{base}/session/start",
+            json={"candidate_id": args.candidate, "session_id": session_id},
+            timeout=10,
+        )
+        started.raise_for_status()
+        session = started.json()
+        session_token = session["session_token"]
+    except (requests.RequestException, KeyError, ValueError) as exc:
+        print(f"FAIL: session creation: {exc}")
+        return 1
 
-        status = "PASS" if result["passed"] else "FAIL"
-        latency = f"{result['latency_ms']}ms" if result["latency_ms"] is not None else "n/a"
-        extra = ""
-        if "score" in result:
-            extra = f" (score={result['score']}, confidence={result.get('confidence')}, review={result.get('needs_human_review')})"
-        print(f"[{status}] {result['name']} - {latency}{extra}")
+    failures = 0
+    for index, case in enumerate(CASES, start=1):
+        payload = {
+            "session_id": session_id,
+            "candidate_id": args.candidate,
+            "role": case["role"],
+            "difficulty": case["difficulty"],
+            "job_description": case.get("job_description", ""),
+            "question": case["question"],
+            "answer": case["answer"],
+            "expected_skills": case.get("expected_skills", []),
+        }
+        evaluation_id = str(uuid.uuid4())
+        for attempt in range(3):
+            try:
+                response = requests.post(
+                    f"{base}/evaluate",
+                    json=payload,
+                    headers={"X-Session-Token": session_token, "X-Evaluation-Id": evaluation_id},
+                    timeout=args.timeout,
+                )
+            except requests.RequestException as exc:
+                print(f"FAIL {case['name']}: {exc}")
+                failures += 1
+                break
+            if response.status_code == 429 and attempt < 2:
+                retry_after = int(response.headers.get("Retry-After", "1"))
+                print(f"WAIT {case['name']}: rate limit; retrying in {retry_after}s")
+                time.sleep(min(retry_after, 120))
+                continue
+            expected_error = case.get("expect_error")
+            if expected_error is not None:
+                ok = response.status_code == expected_error
+                reason = "" if ok else f"HTTP {response.status_code}, expected {expected_error}"
+            else:
+                ok = response.status_code == 200
+                reason = ""
+                if ok:
+                    try:
+                        result = response.json()
+                        ok, reason = _check_expected(case, result)
+                    except ValueError as exc:
+                        ok, reason = False, f"invalid JSON: {exc}"
+                else:
+                    reason = response.text[:500]
+            print(f"{'PASS' if ok else 'FAIL'} {index:02d} {case['name']}: HTTP {response.status_code}{(' - ' + reason) if reason else ''}")
+            if not ok:
+                failures += 1
+            break
 
-        for reason in result["reasons"]:
-            print(f"       -> {reason}")
-
-    passed = sum(r["passed"] for r in results)
-    failed = len(results) - passed
-    latencies = [r["latency_ms"] for r in results if r["latency_ms"] is not None]
-    avg_latency = round(sum(latencies) / len(latencies)) if latencies else None
-
-    print("\n" + "=" * 50)
-    print(f"{passed}/{len(results)} passed, {failed} failed")
-    if avg_latency is not None:
-        print(f"Average latency: {avg_latency}ms")
-    print("=" * 50)
-
-    if args.save:
-        out_path = Path(args.save)
-        out_path.write_text(json.dumps(results, indent=2))
-        print(f"\nSaved detailed results to {out_path}")
-
-    sys.exit(1 if failed else 0)
+    print(f"\nCompleted {len(CASES)} cases; failures={failures}")
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

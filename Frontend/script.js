@@ -1,12 +1,14 @@
+const configuredApiUrl = typeof window.APP_API_URL === "string" ? window.APP_API_URL.trim() : "";
 const API_URL = (
-    window.APP_API_URL ||
-    "https://ai-interview-simulator-backend-mykn.onrender.com"
+    configuredApiUrl ||
+    (window.location.protocol === "file:" ? "http://127.0.0.1:8000" : window.location.origin)
 ).replace(/\/$/, "");
 
-console.log("AI Interview Simulator Frontend v2.0.1");
+console.log("AI Interview Simulator Frontend v3.0.0");
 
-let sessionAccessToken =
-    sessionStorage.getItem("interviewAccessToken") || "";
+let sessionAccessToken = sessionStorage.getItem("interviewSessionToken") || "";
+let candidateAccessToken = localStorage.getItem("interviewCandidateToken") || "";
+let storedCandidateId = localStorage.getItem("interviewCandidate") || "";
 
 const questionBanks = {
     technical: {
@@ -142,6 +144,7 @@ let questions = [];
 let currentQuestion = 0;
 let totalQuestions = 5;
 let interviewScores = [];
+let currentEvaluationId = "";
 
 /*
  * IMPORTANT:
@@ -774,10 +777,10 @@ async function startInterview() {
                          * Existing token allows the same
                          * candidate to start another session.
                          */
-                        ...(sessionAccessToken
+                        ...(candidateAccessToken
                             ? {
                                 access_token:
-                                    sessionAccessToken
+                                    candidateAccessToken
                             }
                             : {})
                     })
@@ -801,28 +804,24 @@ async function startInterview() {
 
 
         if (
-            !sessionPayload.access_token
+            typeof sessionPayload.session_token !== "string" ||
+            !sessionPayload.session_token ||
+            typeof sessionPayload.candidate_access_token !== "string" ||
+            !sessionPayload.candidate_access_token ||
+            typeof sessionPayload.candidate_id !== "string" ||
+            !sessionPayload.candidate_id
         ) {
-
-            throw new Error(
-                "Backend did not return an interview access token."
-            );
+            throw new Error("Backend returned an invalid session response.");
         }
 
+        sessionAccessToken = sessionPayload.session_token;
+        candidateAccessToken = sessionPayload.candidate_access_token;
+        candidateId = sessionPayload.candidate_id;
+        storedCandidateId = candidateId;
 
-        sessionAccessToken =
-            sessionPayload.access_token;
-
-
-        sessionStorage.setItem(
-            "interviewAccessToken",
-            sessionAccessToken
-        );
-
-
-        candidateId =
-            sessionPayload.candidate_id ||
-            candidateId;
+        sessionStorage.setItem("interviewSessionToken", sessionAccessToken);
+        localStorage.setItem("interviewCandidateToken", candidateAccessToken);
+        localStorage.setItem("interviewCandidate", candidateId);
 
 
     } catch (error) {
@@ -1002,6 +1001,7 @@ function showQuestion() {
     if (nextButton) {
 
         nextButton.style.display = "none";
+    currentEvaluationId = (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `evaluation-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
         nextButton.disabled = false;
 
@@ -1239,7 +1239,9 @@ async function checkAnswer() {
                             "application/json",
 
                         "X-Session-Token":
-                            sessionAccessToken
+                            sessionAccessToken,
+                        "X-Evaluation-Id":
+                            currentEvaluationId
                     },
 
                     body: JSON.stringify({
@@ -1796,7 +1798,7 @@ async function finishInterview() {
                 {
                     headers: {
                         "X-Session-Token":
-                            sessionAccessToken
+                            candidateAccessToken
                     }
                 }
             );
