@@ -4,4 +4,3 @@ class EvaluationProviderError(RuntimeError):
 
 class EvaluationValidationError(RuntimeError):
     """The provider returned data that did not satisfy the evaluation schema."""
-
