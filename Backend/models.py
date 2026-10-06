@@ -72,3 +72,38 @@ class InterviewEvaluation(BaseModel):
                 raise ValueError("Feedback items must be 500 characters or fewer.")
             cleaned.append(item)
         return cleaned
+class InterviewStartRequest(BaseModel):
+    candidate_id: str = Field(min_length=1, max_length=150)
+    session_id: str = Field(min_length=1, max_length=100)
+    role: str = Field(min_length=1, max_length=200)
+    interview_type: str = Field(default="technical", max_length=30)
+    difficulty: Difficulty = Difficulty.medium
+    question_count: int = Field(default=5, ge=1, le=50)
+
+    @field_validator(
+        "candidate_id",
+        "session_id",
+        "role",
+        "interview_type",
+    )
+    @classmethod
+    def normalize_interview_fields(cls, value: str) -> str:
+        return value.strip()
+
+
+class InterviewQuestionResponse(BaseModel):
+    id: str
+    question: str
+    skills: List[str]
+    question_number: int
+    total_questions: int
+
+
+class InterviewStartResponse(BaseModel):
+    session_id: str
+    candidate_id: str
+    role: str
+    interview_type: str
+    difficulty: Difficulty
+    question_count: int
+    question: InterviewQuestionResponse
