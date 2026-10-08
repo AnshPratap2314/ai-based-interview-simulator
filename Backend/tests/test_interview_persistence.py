@@ -8,11 +8,6 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-TEST_DB = Path('/tmp/ai_interview_persistence_test.db')
-if TEST_DB.exists():
-    TEST_DB.unlink()
-os.environ['INTERVIEW_DB_PATH'] = str(TEST_DB)
-
 from fastapi.testclient import TestClient
 
 from interview_engine import (

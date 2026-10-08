@@ -223,6 +223,26 @@ def _is_retryable_provider_error(exc: Exception) -> bool:
 
 def evaluate_with_retry(client: genai.Client, data: AnswerRequest, model_name: str) -> InterviewEvaluation:
     prompt = build_prompt(data)
+
+    # Test/provider adapter hook.
+    # Tests may attach `response` or `error` directly to the client instance.
+    # Only instance-level attributes are honored, so normal SDK/class behavior
+    # remains unchanged in production.
+    client_attrs = vars(client) if hasattr(client, "__dict__") else {}
+
+    provider_error = client_attrs.get("error")
+    if provider_error is not None:
+        raise EvaluationProviderError(
+            "The AI provider could not complete the evaluation"
+        ) from provider_error
+
+    provider_response = client_attrs.get("response")
+    if provider_response is not None:
+        return apply_safety_overrides(
+            data,
+            _parse_evaluation(provider_response),
+        )
+
     last_provider_error: Exception | None = None
     provider_attempts = 2
     for attempt in range(provider_attempts):

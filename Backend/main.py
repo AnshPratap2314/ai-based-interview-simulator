@@ -24,6 +24,15 @@ from evaluator import evaluate_with_retry
 from jd_parser import JDAnalysisResult, analyze_job_description
 from resume_parser import ResumeAnalysisResult, ResumeJDMatch, analyze_resume, match_resume_to_jd
 from personalized_interview import PersonalizedInterviewPlan, build_personalized_interview_plan
+from adaptive_difficulty import adapt_after_answer
+from real_interview import (
+    build_final_report,
+    get_live_answers,
+    current_question_payload,
+    init_real_interview_db,
+    save_live_answer,
+    state_from_plan,
+)
 from interview_engine import (
     InterviewConfig,
     InterviewEngine,
@@ -64,7 +73,7 @@ def _env_int(name: str, default: int, minimum: int = 1) -> int:
         return default
 
 
-app = FastAPI(title="AI Interview Preparation OS", version="0.8.0")
+app = FastAPI(title="AI Interview Preparation OS", version="1.0.0")
 
 cors_origins = [
     x.strip().rstrip("/")
@@ -98,6 +107,7 @@ client = (
 
 init_db()
 init_interview_state_db()
+init_real_interview_db()
 interview_engine = InterviewEngine()
 
 RATE_LIMIT_WINDOW_SECONDS = _env_int(
@@ -201,6 +211,59 @@ class InterviewNextResponse(BaseModel):
     question: InterviewQuestionResponse | None = None
     question_number: int
     total_questions: int
+
+
+class LiveInterviewStartRequest(BaseModel):
+    candidate_id: str = Field(min_length=1, max_length=150)
+    session_id: str = Field(min_length=1, max_length=100)
+    plan: PersonalizedInterviewPlan
+
+    def normalized_candidate(self) -> str:
+        return self.candidate_id.strip()
+
+    def normalized_session(self) -> str:
+        return self.session_id.strip()
+
+
+class LiveInterviewStartResponse(BaseModel):
+    session_id: str
+    candidate_id: str
+    role: str
+    completed: bool
+    question: InterviewQuestionResponse | None = None
+    question_number: int
+    total_questions: int
+
+
+class LiveInterviewAnswerRequest(BaseModel):
+    candidate_id: str = Field(min_length=1, max_length=150)
+    session_id: str = Field(min_length=1, max_length=100)
+    question_id: str = Field(min_length=1, max_length=150)
+    answer: str = Field(min_length=1, max_length=12000)
+
+    def normalized_candidate(self) -> str:
+        return self.candidate_id.strip()
+
+    def normalized_session(self) -> str:
+        return self.session_id.strip()
+
+    def normalized_question(self) -> str:
+        return self.question_id.strip()
+
+    def normalized_answer(self) -> str:
+        return self.answer.strip()
+
+
+class LiveInterviewAnswerResponse(BaseModel):
+    session_id: str
+    candidate_id: str
+    question_id: str
+    evaluation: InterviewEvaluation
+    completed: bool
+    question: InterviewQuestionResponse | None = None
+    question_number: int
+    total_questions: int
+    final_report: dict | None = None
 
 
 def _rate_limit_retry_after(key: str) -> int:
@@ -749,6 +812,187 @@ def start_interview(
 
 
 @app.post(
+    "/interview/live/start",
+    response_model=LiveInterviewStartResponse,
+)
+def start_live_interview(
+    data: LiveInterviewStartRequest,
+    x_session_token: str | None = Header(default=None),
+):
+    candidate_id = data.normalized_candidate()
+    session_id = data.normalized_session()
+
+    if not x_session_token:
+        raise HTTPException(
+            status_code=401,
+            detail="Authenticated interview session required.",
+        )
+
+    if not authorize_session(session_id, x_session_token, candidate_id):
+        raise HTTPException(status_code=403, detail="Session access denied.")
+
+    existing_state = load_interview_state(session_id, candidate_id)
+    if existing_state is not None:
+        question_payload = current_question_payload(existing_state)
+        if question_payload is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Interview is already completed. Start a new session.",
+            )
+        return LiveInterviewStartResponse(
+            session_id=session_id,
+            candidate_id=candidate_id,
+            role=existing_state.config.role,
+            completed=False,
+            question=InterviewQuestionResponse(**question_payload),
+            question_number=existing_state.current_index + 1,
+            total_questions=len(existing_state.questions),
+        )
+
+    try:
+        state = state_from_plan(session_id, candidate_id, data.plan)
+        save_interview_state(state)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    question_payload = current_question_payload(state)
+    return LiveInterviewStartResponse(
+        session_id=session_id,
+        candidate_id=candidate_id,
+        role=state.config.role,
+        completed=False,
+        question=InterviewQuestionResponse(**question_payload),
+        question_number=1,
+        total_questions=len(state.questions),
+    )
+
+
+def build_recent_live_scores(session_id: str, candidate_id: str) -> list[float]:
+    return [float(item["score"]) for item in get_live_answers(session_id, candidate_id)]
+
+
+@app.post(
+    "/interview/live/answer",
+    response_model=LiveInterviewAnswerResponse,
+)
+def submit_live_interview_answer(
+    request: Request,
+    data: LiveInterviewAnswerRequest,
+    x_session_token: str | None = Header(default=None),
+    x_evaluation_id: str | None = Header(default=None, alias="X-Evaluation-Id"),
+):
+    candidate_id = data.normalized_candidate()
+    session_id = data.normalized_session()
+    question_id = data.normalized_question()
+
+    if not x_session_token:
+        raise HTTPException(status_code=401, detail="Authenticated interview session required.")
+    if not authorize_session(session_id, x_session_token, candidate_id):
+        raise HTTPException(status_code=403, detail="Session access denied.")
+
+    state = load_interview_state(session_id, candidate_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Interview state not found.")
+
+    current = state.current_question
+    if current is None:
+        raise HTTPException(status_code=409, detail="Interview is already completed.")
+    if current.id != question_id:
+        raise HTTPException(status_code=409, detail="The answered question does not match the current question.")
+    if question_id in state.answered_question_ids:
+        raise HTTPException(status_code=409, detail="This question has already been answered.")
+
+    request_id = (x_evaluation_id or str(uuid.uuid4())).strip()
+    if len(request_id) > 100:
+        raise HTTPException(status_code=400, detail="Evaluation ID is too long.")
+
+    existing = get_evaluation_by_request_id(request_id, session_id, candidate_id)
+    if existing is not None:
+        evaluation = existing
+    else:
+        client_host = request.client.host if request.client else "unknown"
+        rate_key = f"evaluate:{client_host}"
+        if not check_rate_limit(rate_key):
+            retry_after = _rate_limit_retry_after(rate_key)
+            raise HTTPException(
+                status_code=429,
+                detail="Too many evaluation requests. Please wait and try again.",
+                headers={"Retry-After": str(retry_after)},
+            )
+
+        answer_request = AnswerRequest(
+            session_id=session_id,
+            candidate_id=candidate_id,
+            role=state.config.role,
+            difficulty=current.difficulty,
+            question=current.text,
+            answer=data.normalized_answer(),
+            expected_skills=list(current.skills),
+        )
+
+        try:
+            evaluation = evaluate_with_retry(
+                _require_client(),
+                answer_request,
+                MODEL_NAME,
+            )
+            evaluation, _ = save_evaluation(
+                answer_request,
+                evaluation,
+                request_id,
+            )
+        except EvaluationValidationError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="The AI evaluator returned an invalid result. Please try again.",
+            ) from exc
+        except EvaluationProviderError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="The AI evaluator is temporarily unavailable. Please try again.",
+            ) from exc
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("live_interview_answer_failed session_id=%s", session_id)
+            raise HTTPException(
+                status_code=500,
+                detail="Unexpected server error while processing the interview answer.",
+            ) from exc
+
+    save_live_answer(
+        session_id,
+        candidate_id,
+        question_id,
+        request_id,
+        evaluation.score,
+    )
+
+    try:
+        recent_scores = build_recent_live_scores(session_id, candidate_id)
+        adapt_after_answer(state, question_id, recent_scores)
+        save_interview_state(state)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    next_payload = current_question_payload(state)
+    completed = next_payload is None
+    final_report = build_final_report(session_id, candidate_id) if completed else None
+
+    return LiveInterviewAnswerResponse(
+        session_id=session_id,
+        candidate_id=candidate_id,
+        question_id=question_id,
+        evaluation=evaluation,
+        completed=completed,
+        question=InterviewQuestionResponse(**next_payload) if next_payload else None,
+        question_number=state.current_index if completed else state.current_index + 1,
+        total_questions=len(state.questions),
+        final_report=final_report,
+    )
+
+
+@app.post(
     "/interview/next",
     response_model=InterviewNextResponse,
 )
@@ -1071,4 +1315,5 @@ if FRONTEND_DIR.exists():
         ),
         name="frontend",
     )
+
 
